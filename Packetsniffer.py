@@ -1,51 +1,29 @@
-from scapy.all import *
-from scapy.layers.http import HTTPRequest
-import argparse
+import socket
+import struct
 
-def sniff_packets(interface, filter_protocol=None):
-    """
-    Sniffs network traffic on a given interface.
-    Optional: Filter by protocol (e.g., 'tcp', 'http').
-    """
-    print(f"[+] Sniffing on {interface}... (Ctrl+C to stop)")
-    try:
-        sniff(
-            iface=interface,
-            prn=lambda pkt: process_packet(pkt, filter_protocol),
-            store=False
-        )
-    except KeyboardInterrupt:
-        print("\n[!] Sniffer stopped.")
+def sniff():
+    # Create a raw socket and bind it to the public interface
+    sniffer = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(3))
 
-def process_packet(packet, filter_protocol):
-    """Processes each captured packet."""
-    if filter_protocol and filter_protocol not in packet:
-        return  # Skip if protocol filter is active
+    print("Listening for packets...")
+    while True:
+        # Receive raw packet data
+        raw_data, addr = sniffer.recvfrom(65536)
+        
+        # Extract Ethernet header
+        dest_mac, src_mac, eth_proto, data = ethernet_frame(raw_data)
+        
+        print("\nEthernet Frame:")
+        print(f"Destination: {dest_mac}, Source: {src_mac}, Protocol: {eth_proto}")
 
-    # Basic packet info
-    if packet.haslayer(IP):
-        src_ip = packet[IP].src
-        dst_ip = packet[IP].dst
-        proto = packet[IP].proto
+# Function to parse Ethernet frames
+def ethernet_frame(data):
+    dest_mac, src_mac, proto = struct.unpack('! 6s 6s H', data[:14])
+    return get_mac(dest_mac), get_mac(src_mac), socket.htons(proto), data[14:]
 
-        print(f"\n[IP] {src_ip} → {dst_ip} | Proto: {proto}")
-
-    # TCP/UDP details
-    if packet.haslayer(TCP):
-        print(f"[TCP] Port: {packet[TCP].sport} → {packet[TCP].dport}")
-        if packet.haslayer(Raw):
-            print(f"[Payload]\n{hexdump(packet[Raw].load)}")
-
-    # HTTP traffic
-    if packet.haslayer(HTTPRequest):
-        host = packet[HTTPRequest].Host.decode()
-        path = packet[HTTPRequest].Path.decode()
-        print(f"[HTTP] {host}{path}")
+# Convert raw MAC address to readable format
+def get_mac(bytes_addr):
+    return ':'.join(map('{:02x}'.format, bytes_addr))
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-i", "--interface", help="Network interface (e.g., eth0, wlan0)", required=True)
-    parser.add_argument("-f", "--filter", help="Filter by protocol (e.g., tcp, http)")
-    args = parser.parse_args()
-
-    sniff_packets(args.interface, args.filter)
+    sniff()
